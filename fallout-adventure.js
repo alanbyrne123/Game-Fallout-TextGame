@@ -190,6 +190,12 @@ class FalloutAdventure {
                 this.addText(`\nEnemies: ${location.enemies.map(enemy => enemy.name).join(', ')}`, 'error');
             }
         } else {
+            // Check if looking in a direction first
+            const direction = this.checkDirectionLook(noun);
+            if (direction) {
+                return; // Direction look was handled
+            }
+            
             // Look at specific item or NPC
             const item = this.findItemInLocation(noun);
             const npc = this.findNPCInLocation(noun);
@@ -205,6 +211,37 @@ class FalloutAdventure {
                 this.addText(`You don't see ${noun} here.`, 'error');
             }
         }
+    }
+    
+    checkDirectionLook(direction) {
+        const location = this.locations[this.currentLocation];
+        const exit = location.exits.find(exit => 
+            exit.direction.toLowerCase() === direction.toLowerCase() ||
+            exit.direction.toLowerCase().includes(direction.toLowerCase())
+        );
+        
+        if (exit) {
+            const targetLocation = this.locations[exit.location];
+            this.addText(`Looking ${exit.direction}, you see:`, 'info');
+            this.addText(targetLocation.shortDescription, 'highlight');
+            
+            // Add some additional details about what you can see
+            if (targetLocation.enemies && targetLocation.enemies.length > 0) {
+                this.addText(`You can see ${targetLocation.enemies.length} enemy(ies) in the distance.`, 'error');
+            }
+            
+            if (targetLocation.npcs && targetLocation.npcs.length > 0) {
+                this.addText(`You can see ${targetLocation.npcs.length} person(s) there.`, 'info');
+            }
+            
+            if (targetLocation.items && targetLocation.items.length > 0) {
+                this.addText(`You notice some items scattered about.`, 'info');
+            }
+            
+            return true;
+        }
+        
+        return false;
     }
     
     goCommand(direction) {
