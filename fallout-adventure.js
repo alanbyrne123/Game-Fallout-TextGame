@@ -118,6 +118,11 @@ class FalloutAdventure {
             case 'l':
                 this.lookCommand(noun);
                 break;
+            case 'examine':
+            case 'ex':
+            case 'inspect':
+                this.examineCommand(noun);
+                break;
             case 'go':
             case 'move':
             case 'walk':
@@ -242,6 +247,83 @@ class FalloutAdventure {
         }
         
         return false;
+    }
+    
+    examineCommand(itemName) {
+        if (!itemName) {
+            this.addText('Examine what?', 'error');
+            return;
+        }
+        
+        // Check inventory first
+        const inventoryItem = this.findItemInInventory(itemName);
+        if (inventoryItem) {
+            this.examineItem(inventoryItem);
+            return;
+        }
+        
+        // Check location items
+        const locationItem = this.findItemInLocation(itemName);
+        if (locationItem) {
+            this.examineItem(locationItem);
+            return;
+        }
+        
+        this.addText(`You don't see ${itemName} here or in your inventory.`, 'error');
+    }
+    
+    examineItem(item) {
+        this.addText(`Examining ${item.name}:`, 'highlight');
+        this.addText(item.description, 'info');
+        
+        // Show item stats based on type
+        if (item.type === 'weapon') {
+            this.addText(`Type: Weapon`, 'info');
+            this.addText(`Damage: ${item.damage}`, 'info');
+            this.addText(`Weight: ${item.weight} lbs`, 'info');
+            if (item.durability) {
+                this.addText(`Durability: ${item.durability}%`, 'info');
+            }
+        } else if (item.type === 'armor') {
+            this.addText(`Type: Armor`, 'info');
+            this.addText(`Defense: ${item.defense || 0}`, 'info');
+            this.addText(`Weight: ${item.weight} lbs`, 'info');
+            if (item.durability) {
+                this.addText(`Durability: ${item.durability}%`, 'info');
+            }
+        } else if (item.type === 'consumable') {
+            this.addText(`Type: Consumable`, 'info');
+            this.addText(`Weight: ${item.weight} lbs`, 'info');
+            if (item.effect) {
+                this.addText(`Effect: ${this.getEffectDescription(item.effect)}`, 'info');
+            }
+        } else if (item.type === 'currency') {
+            this.addText(`Type: Currency`, 'info');
+            this.addText(`Weight: ${item.weight} lbs`, 'info');
+        } else {
+            this.addText(`Type: ${item.type}`, 'info');
+            this.addText(`Weight: ${item.weight} lbs`, 'info');
+        }
+        
+        // Show if equipped
+        if (this.player.equipped.weapon === item) {
+            this.addText(`Status: Equipped (Weapon)`, 'success');
+        } else if (this.player.equipped.armor === item) {
+            this.addText(`Status: Equipped (Armor)`, 'success');
+        }
+    }
+    
+    getEffectDescription(effect) {
+        switch (effect.type) {
+            case 'heal':
+                return `Restores ${effect.value} HP`;
+            case 'rads':
+                return effect.value > 0 ? `Adds ${effect.value} radiation` : `Removes ${Math.abs(effect.value)} radiation`;
+            case 'stat':
+                return `${effect.value > 0 ? '+' : ''}${effect.value} to ${effect.stat}`;
+            default:
+                return 'Unknown effect';
+        }
     }
     
     goCommand(direction) {
@@ -423,6 +505,7 @@ class FalloutAdventure {
     helpCommand() {
         this.addText('Available Commands:', 'highlight');
         this.addText('look/l [item] - Look around or at specific item', 'info');
+        this.addText('examine/ex/inspect [item] - Examine item stats in detail', 'info');
         this.addText('go/move/walk [direction] - Move in a direction', 'info');
         this.addText('take/get/pick [item] - Take an item', 'info');
         this.addText('take/get/pick all - Take all items here', 'info');
