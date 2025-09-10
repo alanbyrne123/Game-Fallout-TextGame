@@ -286,8 +286,7 @@ class FalloutAdventure {
             return;
         }
         
-        this.player.inventory.push(item);
-        this.player.weight += item.weight;
+        this.addItemToInventory(item);
         this.locations[this.currentLocation].items = this.locations[this.currentLocation].items.filter(i => i !== item);
         
         this.addText(`You take the ${item.name}.`, 'success');
@@ -307,8 +306,7 @@ class FalloutAdventure {
         
         for (const item of items) {
             if (this.player.weight + item.weight <= this.player.maxWeight) {
-                this.player.inventory.push(item);
-                this.player.weight += item.weight;
+                this.addItemToInventory(item);
                 takenItems.push(item.name);
                 // Remove from location
                 location.items = location.items.filter(i => i !== item);
@@ -384,7 +382,12 @@ class FalloutAdventure {
         
         this.addText('Inventory:', 'highlight');
         this.player.inventory.forEach((item, index) => {
-            this.addText(`${index + 1}. ${item.name} (${item.weight} lbs)`, 'info');
+            let displayText = `${index + 1}. ${item.name}`;
+            if (item.count && item.count > 1) {
+                displayText += ` (x${item.count})`;
+            }
+            displayText += ` (${item.weight * (item.count || 1)} lbs)`;
+            this.addText(displayText, 'info');
         });
     }
     
@@ -661,8 +664,15 @@ class FalloutAdventure {
     }
     
     removeItemFromInventory(item) {
-        this.player.inventory = this.player.inventory.filter(i => i !== item);
-        this.player.weight -= item.weight;
+        if (item.count && item.count > 1) {
+            // Reduce count for stacked items
+            item.count--;
+            this.player.weight -= item.weight;
+        } else {
+            // Remove item completely
+            this.player.inventory = this.player.inventory.filter(i => i !== item);
+            this.player.weight -= item.weight;
+        }
         this.updateInventoryUI();
     }
     
@@ -758,6 +768,38 @@ class FalloutAdventure {
         });
     }
     
+    addItemToInventory(item) {
+        // Check if item can be stacked
+        if (this.canStackItem(item)) {
+            const existingItem = this.player.inventory.find(invItem => 
+                invItem.name === item.name && invItem.type === item.type
+            );
+            
+            if (existingItem) {
+                // Stack with existing item
+                existingItem.count = (existingItem.count || 1) + 1;
+                this.player.weight += item.weight;
+            } else {
+                // Add new stackable item
+                const stackableItem = { ...item, count: 1 };
+                this.player.inventory.push(stackableItem);
+                this.player.weight += item.weight;
+            }
+        } else {
+            // Non-stackable item
+            this.player.inventory.push(item);
+            this.player.weight += item.weight;
+        }
+    }
+    
+    canStackItem(item) {
+        // Items that can be stacked
+        const stackableTypes = ['currency', 'consumable', 'ammo'];
+        const stackableNames = ['Bottle Cap', 'Pre-War Money'];
+        
+        return stackableTypes.includes(item.type) || stackableNames.includes(item.name);
+    }
+    
     updateInventoryUI() {
         const inventoryList = document.getElementById('inventoryList');
         inventoryList.innerHTML = '';
@@ -768,7 +810,14 @@ class FalloutAdventure {
             this.player.inventory.forEach(item => {
                 const itemDiv = document.createElement('div');
                 itemDiv.className = 'inventory-item';
-                itemDiv.textContent = `${item.name} (${item.weight} lbs)`;
+                
+                let displayText = item.name;
+                if (item.count && item.count > 1) {
+                    displayText += ` (x${item.count})`;
+                }
+                displayText += ` (${item.weight * (item.count || 1)} lbs)`;
+                
+                itemDiv.textContent = displayText;
                 inventoryList.appendChild(itemDiv);
             });
         }
