@@ -58,7 +58,7 @@ class FalloutAdventure {
         // Game World
         this.currentLocation = 'vault101';
         this.visitedLocations = new Set(['vault101']);
-        this.quests = [];
+        this.activeQuests = [];
         this.completedQuests = [];
         
         // Combat System
@@ -613,7 +613,7 @@ class FalloutAdventure {
             player: this.player,
             currentLocation: this.currentLocation,
             visitedLocations: Array.from(this.visitedLocations),
-            quests: this.quests,
+            activeQuests: this.activeQuests,
             completedQuests: this.completedQuests,
             gameTime: this.gameTime
         };
@@ -635,8 +635,8 @@ class FalloutAdventure {
             this.player = data.player;
             this.currentLocation = data.currentLocation;
             this.visitedLocations = new Set(data.visitedLocations);
-            this.quests = data.quests;
-            this.completedQuests = data.completedQuests;
+            this.activeQuests = data.activeQuests || [];
+            this.completedQuests = data.completedQuests || [];
             this.gameTime = data.gameTime;
             
             // Consolidate duplicate items after loading
@@ -887,20 +887,45 @@ class FalloutAdventure {
         this.addText('Your health and action points have increased!', 'success');
     }
     
-    offerQuest(quest) {
-        if (!this.quests.includes(quest.id)) {
-            this.quests.push(quest.id);
+    offerQuest(questId) {
+        const quest = this.quests[questId];
+        if (!quest) {
+            this.addText(`Quest not found: ${questId}`, 'error');
+            return;
+        }
+        
+        if (!this.activeQuests) {
+            this.activeQuests = [];
+        }
+        
+        if (!this.activeQuests.includes(questId)) {
+            this.activeQuests.push(questId);
             this.addText(`New quest: ${quest.name}`, 'highlight');
             this.addText(quest.description, 'info');
+            this.addText(`Objectives: ${quest.objectives.join(', ')}`, 'info');
             this.updateQuestUI();
         }
     }
     
     completeQuest(questId) {
-        if (this.quests.includes(questId)) {
-            this.quests = this.quests.filter(q => q !== questId);
+        const quest = this.quests[questId];
+        if (!quest) return;
+        
+        if (this.activeQuests && this.activeQuests.includes(questId)) {
+            this.activeQuests = this.activeQuests.filter(q => q !== questId);
             this.completedQuests.push(questId);
-            this.addText(`Quest completed: ${questId}`, 'success');
+            
+            this.addText(`Quest completed: ${quest.name}`, 'success');
+            
+            // Give rewards
+            if (quest.reward.experience) {
+                this.gainExperience(quest.reward.experience);
+            }
+            if (quest.reward.caps) {
+                this.player.caps += quest.reward.caps;
+                this.addText(`You receive ${quest.reward.caps} caps!`, 'success');
+            }
+            
             this.updateQuestUI();
         }
     }
@@ -1075,11 +1100,11 @@ class FalloutAdventure {
         const questList = document.getElementById('questList');
         questList.innerHTML = '';
         
-        if (this.quests.length === 0) {
+        if (!this.activeQuests || this.activeQuests.length === 0) {
             questList.innerHTML = '<div class="quest-item">No active quests</div>';
         } else {
-            this.quests.forEach(questId => {
-                const quest = this.quests.find(q => q.id === questId);
+            this.activeQuests.forEach(questId => {
+                const quest = this.quests[questId];
                 if (quest) {
                     const questDiv = document.createElement('div');
                     questDiv.className = 'quest-item active';
@@ -1432,15 +1457,40 @@ class FalloutAdventure {
     }
     
     initializeQuests() {
-        return [
-            {
+        return {
+            firstSteps: {
                 id: 'firstSteps',
                 name: 'First Steps',
                 description: 'Explore the wasteland and find your first settlement.',
                 objectives: ['Visit Megaton', 'Talk to Lucas Simms'],
-                reward: { experience: 50, caps: 100 }
+                reward: { experience: 50, caps: 100 },
+                completed: false
+            },
+            moiraExperiments: {
+                id: 'moiraExperiments',
+                name: 'Moira\'s Experiments',
+                description: 'Test some of Moira\'s inventions for her. She promises they\'re safe... mostly.',
+                objectives: ['Talk to Moira Brown', 'Test 3 inventions'],
+                reward: { experience: 100, caps: 150 },
+                completed: false
+            },
+            clearRaiderCamp: {
+                id: 'clearRaiderCamp',
+                name: 'Clear the Raider Camp',
+                description: 'Moriarty wants you to clear out the raider camp to the east to prove your worth.',
+                objectives: ['Go to Raider Camp', 'Defeat all raiders'],
+                reward: { experience: 200, caps: 300 },
+                completed: false
+            },
+            exploreWasteland: {
+                id: 'exploreWasteland',
+                name: 'Wasteland Explorer',
+                description: 'Explore the dangerous wasteland and discover new locations.',
+                objectives: ['Visit 5 different locations', 'Survive 3 combat encounters'],
+                reward: { experience: 150, caps: 200 },
+                completed: false
             }
-        ];
+        };
     }
     
     initializeEnemies() {
