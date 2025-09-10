@@ -289,7 +289,11 @@ class FalloutAdventure {
         this.addItemToInventory(item);
         this.locations[this.currentLocation].items = this.locations[this.currentLocation].items.filter(i => i !== item);
         
-        this.addText(`You take the ${item.name}.`, 'success');
+        if (item.name === 'Bottle Cap' && item.type === 'currency') {
+            this.addText(`You collect a bottle cap (1 cap)`, 'success');
+        } else {
+            this.addText(`You take the ${item.name}.`, 'success');
+        }
         this.updateInventoryUI();
     }
     
@@ -298,6 +302,7 @@ class FalloutAdventure {
         const items = [...location.items]; // Copy the array
         let takenItems = [];
         let skippedItems = [];
+        let capsFound = 0;
         
         if (items.length === 0) {
             this.addText('There are no items here to take.', 'info');
@@ -305,7 +310,12 @@ class FalloutAdventure {
         }
         
         for (const item of items) {
-            if (this.player.weight + item.weight <= this.player.maxWeight) {
+            if (item.name === 'Bottle Cap' && item.type === 'currency') {
+                // Bottle caps don't count against weight
+                this.player.caps += 1;
+                capsFound++;
+                location.items = location.items.filter(i => i !== item);
+            } else if (this.player.weight + item.weight <= this.player.maxWeight) {
                 this.addItemToInventory(item);
                 takenItems.push(item.name);
                 // Remove from location
@@ -313,6 +323,10 @@ class FalloutAdventure {
             } else {
                 skippedItems.push(item.name);
             }
+        }
+        
+        if (capsFound > 0) {
+            this.addText(`You collect ${capsFound} bottle cap(s) (${capsFound} caps)`, 'success');
         }
         
         if (takenItems.length > 0) {
@@ -772,6 +786,12 @@ class FalloutAdventure {
     }
     
     addItemToInventory(item) {
+        // Handle currency items (bottle caps) - convert to caps instead of inventory
+        if (item.name === 'Bottle Cap' && item.type === 'currency') {
+            this.player.caps += 1;
+            return; // Don't add to inventory
+        }
+        
         // Check if item can be stacked
         if (this.canStackItem(item)) {
             const existingItem = this.player.inventory.find(invItem => 
@@ -812,6 +832,12 @@ class FalloutAdventure {
         
         // Group items by name and type
         this.player.inventory.forEach(item => {
+            // Convert bottle caps to caps instead of keeping in inventory
+            if (item.name === 'Bottle Cap' && item.type === 'currency') {
+                this.player.caps += (item.count || 1);
+                return; // Skip adding to inventory
+            }
+            
             const key = `${item.name}_${item.type}`;
             
             if (this.canStackItem(item)) {
