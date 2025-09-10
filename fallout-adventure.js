@@ -268,6 +268,12 @@ class FalloutAdventure {
     }
     
     takeCommand(itemName) {
+        // Handle "take all" command
+        if (itemName.toLowerCase() === 'all') {
+            this.takeAllCommand();
+            return;
+        }
+        
         const item = this.findItemInLocation(itemName);
         
         if (!item) {
@@ -285,6 +291,40 @@ class FalloutAdventure {
         this.locations[this.currentLocation].items = this.locations[this.currentLocation].items.filter(i => i !== item);
         
         this.addText(`You take the ${item.name}.`, 'success');
+        this.updateInventoryUI();
+    }
+    
+    takeAllCommand() {
+        const location = this.locations[this.currentLocation];
+        const items = [...location.items]; // Copy the array
+        let takenItems = [];
+        let skippedItems = [];
+        
+        if (items.length === 0) {
+            this.addText('There are no items here to take.', 'info');
+            return;
+        }
+        
+        for (const item of items) {
+            if (this.player.weight + item.weight <= this.player.maxWeight) {
+                this.player.inventory.push(item);
+                this.player.weight += item.weight;
+                takenItems.push(item.name);
+                // Remove from location
+                location.items = location.items.filter(i => i !== item);
+            } else {
+                skippedItems.push(item.name);
+            }
+        }
+        
+        if (takenItems.length > 0) {
+            this.addText(`You take: ${takenItems.join(', ')}`, 'success');
+        }
+        
+        if (skippedItems.length > 0) {
+            this.addText(`You can't carry: ${skippedItems.join(', ')} (too heavy)`, 'error');
+        }
+        
         this.updateInventoryUI();
     }
     
@@ -368,6 +408,7 @@ class FalloutAdventure {
         this.addText('look/l [item] - Look around or at specific item', 'info');
         this.addText('go/move/walk [direction] - Move in a direction', 'info');
         this.addText('take/get/pick [item] - Take an item', 'info');
+        this.addText('take/get/pick all - Take all items here', 'info');
         this.addText('use [item] - Use an item', 'info');
         this.addText('talk/speak [person] - Talk to someone', 'info');
         this.addText('attack/fight [enemy] - Attack an enemy', 'info');
