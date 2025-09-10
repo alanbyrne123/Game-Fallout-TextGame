@@ -454,6 +454,9 @@ class FalloutAdventure {
             this.completedQuests = data.completedQuests;
             this.gameTime = data.gameTime;
             
+            // Consolidate duplicate items after loading
+            this.consolidateInventory();
+            
             this.addText('Game loaded successfully!', 'success');
             this.updateUI();
             this.lookCommand();
@@ -798,6 +801,44 @@ class FalloutAdventure {
         const stackableNames = ['Bottle Cap', 'Pre-War Money'];
         
         return stackableTypes.includes(item.type) || stackableNames.includes(item.name);
+    }
+    
+    consolidateInventory() {
+        const consolidatedInventory = [];
+        const itemMap = new Map();
+        
+        // First, reset weight to 0
+        this.player.weight = 0;
+        
+        // Group items by name and type
+        this.player.inventory.forEach(item => {
+            const key = `${item.name}_${item.type}`;
+            
+            if (this.canStackItem(item)) {
+                if (itemMap.has(key)) {
+                    // Add to existing stack
+                    const existingItem = itemMap.get(key);
+                    existingItem.count = (existingItem.count || 1) + (item.count || 1);
+                } else {
+                    // Create new stack
+                    const stackableItem = { ...item, count: item.count || 1 };
+                    itemMap.set(key, stackableItem);
+                }
+            } else {
+                // Non-stackable item, add as-is
+                consolidatedInventory.push(item);
+                this.player.weight += item.weight;
+            }
+        });
+        
+        // Add all stacked items to inventory
+        itemMap.forEach(item => {
+            consolidatedInventory.push(item);
+            this.player.weight += item.weight * item.count;
+        });
+        
+        // Replace inventory with consolidated version
+        this.player.inventory = consolidatedInventory;
     }
     
     updateInventoryUI() {
