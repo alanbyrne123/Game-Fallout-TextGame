@@ -66,6 +66,9 @@ class FalloutAdventure {
         this.currentEnemy = null;
         this.combatActions = [];
         
+        // Dialogue System
+        this.currentDialogueNPC = null;
+        
         // Game Data
         this.locations = this.initializeLocations();
         this.npcs = this.initializeNPCs();
@@ -111,6 +114,13 @@ class FalloutAdventure {
         if (this.inCombat) {
             this.processCombatCommand(command);
             return;
+        }
+        
+        // Check if we're in dialogue
+        if (this.currentDialogueNPC) {
+            if (this.processDialogueCommand(command)) {
+                return;
+            }
         }
         
         switch (verb) {
@@ -451,11 +461,89 @@ class FalloutAdventure {
             return;
         }
         
+        this.startDialogue(npc);
+    }
+    
+    startDialogue(npc) {
         this.addText(`You talk to ${npc.name}.`, 'info');
         this.addText(`"${npc.dialogue}"`, 'highlight');
         
+        // Show dialogue options if available
+        if (npc.dialogueOptions && npc.dialogueOptions.length > 0) {
+            this.addText('\nWhat do you want to ask?', 'info');
+            npc.dialogueOptions.forEach((option, index) => {
+                this.addText(`${index + 1}. ${option.text}`, 'info');
+            });
+            this.addText('Type the number to select an option, or "bye" to end the conversation.', 'info');
+            
+            // Store current NPC for dialogue continuation
+            this.currentDialogueNPC = npc;
+        }
+        
         if (npc.quest) {
             this.offerQuest(npc.quest);
+        }
+    }
+    
+    processDialogueCommand(command) {
+        if (!this.currentDialogueNPC) return false;
+        
+        const words = command.toLowerCase().split(' ');
+        const verb = words[0];
+        
+        if (verb === 'bye' || verb === 'goodbye' || verb === 'end') {
+            this.addText(`You end the conversation with ${this.currentDialogueNPC.name}.`, 'info');
+            this.currentDialogueNPC = null;
+            return true;
+        }
+        
+        // Check if it's a number for dialogue options
+        const optionNumber = parseInt(verb);
+        if (!isNaN(optionNumber) && this.currentDialogueNPC.dialogueOptions) {
+            const option = this.currentDialogueNPC.dialogueOptions[optionNumber - 1];
+            if (option) {
+                this.addText(`You ask: "${option.text}"`, 'info');
+                this.addText(`"${option.response}"`, 'highlight');
+                
+                // Handle any special effects
+                if (option.effect) {
+                    this.handleDialogueEffect(option.effect);
+                }
+                
+                // Show follow-up options if available
+                if (option.followUp && option.followUp.length > 0) {
+                    this.addText('\nWhat else do you want to ask?', 'info');
+                    option.followUp.forEach((followOption, index) => {
+                        this.addText(`${index + 1}. ${followOption.text}`, 'info');
+                    });
+                }
+                
+                return true;
+            }
+        }
+        
+        return false;
+    }
+    
+    handleDialogueEffect(effect) {
+        switch (effect.type) {
+            case 'give_item':
+                const item = this.items[effect.item];
+                if (item) {
+                    this.addItemToInventory(item);
+                    this.addText(`You receive: ${item.name}`, 'success');
+                }
+                break;
+            case 'give_caps':
+                this.player.caps += effect.amount;
+                this.addText(`You receive ${effect.amount} caps.`, 'success');
+                break;
+            case 'complete_quest':
+                this.completeQuest(effect.quest);
+                break;
+            case 'offer_quest':
+                this.offerQuest(effect.quest);
+                break;
         }
     }
     
@@ -1085,8 +1173,63 @@ class FalloutAdventure {
                 ],
                 items: [],
                 npcs: [
-                    { name: 'Lucas Simms', description: 'The sheriff of Megaton, a gruff but fair man.', dialogue: 'Welcome to Megaton, stranger. Keep your nose clean and you\'ll be fine.' },
-                    { name: 'Moira Brown', description: 'A cheerful woman who runs the general store.', dialogue: 'Hello there! I\'m Moira Brown. I run Craterside Supply. Need anything?' }
+                    { 
+                        name: 'Lucas Simms', 
+                        description: 'The sheriff of Megaton, a gruff but fair man.', 
+                        dialogue: 'Welcome to Megaton, stranger. Keep your nose clean and you\'ll be fine.',
+                        dialogueOptions: [
+                            {
+                                text: 'Tell me about Megaton',
+                                response: 'Megaton\'s been here for years. We built it around that bomb - some say it\'s safe, others say it\'s a ticking time bomb. I keep the peace around here.',
+                                followUp: [
+                                    {
+                                        text: 'Is the bomb really safe?',
+                                        response: 'Been here for 200 years and hasn\'t gone off yet. But I won\'t lie - it makes some folks nervous. That\'s why we have the Church of Atom here.'
+                                    },
+                                    {
+                                        text: 'What about the raiders?',
+                                        response: 'They stay away from Megaton. We\'re well-armed and organized. Plus, we have the Brotherhood of Steel keeping an eye on things from time to time.'
+                                    }
+                                ]
+                            },
+                            {
+                                text: 'Any work available?',
+                                response: 'Not from me directly, but Moira over at Craterside Supply might have some odd jobs. She\'s always looking for someone to test her "experiments."',
+                                effect: { type: 'offer_quest', quest: 'moiraExperiments' }
+                            },
+                            {
+                                text: 'What\'s the law like here?',
+                                response: 'Simple rules: no stealing, no murder, no causing trouble. Break the rules and you answer to me. I run a tight ship here.'
+                            }
+                        ]
+                    },
+                    { 
+                        name: 'Moira Brown', 
+                        description: 'A cheerful woman who runs the general store.', 
+                        dialogue: 'Hello there! I\'m Moira Brown. I run Craterside Supply. Need anything?',
+                        dialogueOptions: [
+                            {
+                                text: 'What do you sell?',
+                                response: 'Oh, all sorts of things! Weapons, armor, medical supplies, food, and some of my own inventions. I also buy scrap and junk if you have any.',
+                                followUp: [
+                                    {
+                                        text: 'What kind of inventions?',
+                                        response: 'Well, I\'ve been working on some... interesting devices. Some work better than others. Would you be interested in testing some of them?',
+                                        effect: { type: 'offer_quest', quest: 'moiraExperiments' }
+                                    }
+                                ]
+                            },
+                            {
+                                text: 'Do you have any work?',
+                                response: 'Actually, yes! I need someone to test some of my inventions. They\'re perfectly safe... mostly. I\'ll pay you 50 caps for each test!',
+                                effect: { type: 'offer_quest', quest: 'moiraExperiments' }
+                            },
+                            {
+                                text: 'Tell me about yourself',
+                                response: 'I\'m a scientist and inventor! I came to Megaton because it\'s safer than the wasteland, and there\'s plenty of scrap to work with. I love creating new things!'
+                            }
+                        ]
+                    }
                 ],
                 enemies: []
             },
@@ -1116,8 +1259,63 @@ class FalloutAdventure {
                 ],
                 items: [],
                 npcs: [
-                    { name: 'Moriarty', description: 'The owner of the saloon, a shrewd businessman.', dialogue: 'Welcome to my establishment. What\'ll it be?' },
-                    { name: 'Gob', description: 'A friendly ghoul bartender.', dialogue: 'Hey there! What can I get you to drink?' }
+                    { 
+                        name: 'Moriarty', 
+                        description: 'The owner of the saloon, a shrewd businessman.', 
+                        dialogue: 'Welcome to my establishment. What\'ll it be?',
+                        dialogueOptions: [
+                            {
+                                text: 'What do you know about the wasteland?',
+                                response: 'I know a lot of things, friend. Information is my business. But good information costs good money.',
+                                followUp: [
+                                    {
+                                        text: 'What kind of information?',
+                                        response: 'Trade routes, safe paths, dangerous areas, who to trust and who to avoid. I also know about some... interesting opportunities for someone with your skills.'
+                                    }
+                                ]
+                            },
+                            {
+                                text: 'Any jobs available?',
+                                response: 'Maybe. I hear things, and sometimes I need someone to... investigate. But first, let\'s see if you can handle yourself. Go clear out that raider camp to the east, then we\'ll talk.',
+                                effect: { type: 'offer_quest', quest: 'clearRaiderCamp' }
+                            },
+                            {
+                                text: 'Tell me about yourself',
+                                response: 'I\'m a businessman. I run this saloon, I trade information, and I keep my ear to the ground. In the wasteland, knowledge is power, and power is survival.'
+                            }
+                        ]
+                    },
+                    { 
+                        name: 'Gob', 
+                        description: 'A friendly ghoul bartender.', 
+                        dialogue: 'Hey there! What can I get you to drink?',
+                        dialogueOptions: [
+                            {
+                                text: 'What\'s good here?',
+                                response: 'We\'ve got Nuka-Cola, purified water, and some homemade brew. The Nuka-Cola\'s the real deal - pre-war stuff!',
+                                followUp: [
+                                    {
+                                        text: 'How much for a Nuka-Cola?',
+                                        response: 'That\'ll be 10 caps. It\'s worth it though - tastes just like it did before the war!'
+                                    }
+                                ]
+                            },
+                            {
+                                text: 'How long have you worked here?',
+                                response: 'Been here for years. Moriarty took me in when I was in a bad spot. He\'s a good boss, despite what some people say.',
+                                followUp: [
+                                    {
+                                        text: 'What do people say about him?',
+                                        response: 'Oh, you know... that he\'s ruthless, that he\'s got connections to the wrong people. But he\'s always been fair to me.'
+                                    }
+                                ]
+                            },
+                            {
+                                text: 'Tell me about being a ghoul',
+                                response: 'It\'s not easy, but it\'s not all bad either. The radiation doesn\'t bother me, and I\'ll live a lot longer than most humans. But some people... they don\'t like looking at me.'
+                            }
+                        ]
+                    }
                 ],
                 enemies: []
             },
