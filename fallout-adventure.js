@@ -166,7 +166,7 @@ class FalloutAdventure {
         
         if (!noun) {
             this.addText(location.description, 'highlight');
-            this.addText(`\nExits: ${location.exits.join(', ')}`, 'info');
+            this.addText(`\nExits: ${location.exits.map(exit => exit.direction).join(', ')}`, 'info');
             
             if (location.items && location.items.length > 0) {
                 this.addText(`\nItems here: ${location.items.map(item => item.name).join(', ')}`, 'info');
