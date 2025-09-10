@@ -107,6 +107,12 @@ class FalloutAdventure {
         
         this.addText(`> ${command}`, 'info');
         
+        // Check if we're in combat first
+        if (this.inCombat) {
+            this.processCombatCommand(command);
+            return;
+        }
+        
         switch (verb) {
             case 'look':
             case 'l':
@@ -132,6 +138,10 @@ class FalloutAdventure {
             case 'attack':
             case 'fight':
                 this.attackCommand(noun);
+                break;
+            case 'flee':
+            case 'run':
+                this.addText('You are not in combat.', 'error');
                 break;
             case 'inventory':
             case 'inv':
@@ -400,8 +410,12 @@ class FalloutAdventure {
             case 'run':
                 this.fleeCombat();
                 break;
+            case 'use':
+                const itemName = words.slice(1).join(' ');
+                this.useItemInCombat(itemName);
+                break;
             default:
-                this.addText('In combat! Use "attack" or "flee".', 'error');
+                this.addText('In combat! Use "attack", "flee", or "use [item]".', 'error');
         }
     }
     
@@ -435,6 +449,22 @@ class FalloutAdventure {
     fleeCombat() {
         this.addText('You flee from combat!', 'info');
         this.endCombat(false);
+    }
+    
+    useItemInCombat(itemName) {
+        const item = this.findItemInInventory(itemName);
+        
+        if (!item) {
+            this.addText(`You don't have ${itemName}.`, 'error');
+            return;
+        }
+        
+        if (item.type === 'consumable') {
+            this.useConsumable(item);
+            this.addText(`You use ${item.name} in combat!`, 'success');
+        } else {
+            this.addText(`You can't use ${item.name} in combat.`, 'error');
+        }
     }
     
     endCombat(victory) {
