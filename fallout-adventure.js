@@ -79,6 +79,7 @@ class FalloutAdventure {
         this.locations = this.initializeLocations();
         
         this.initializeEventListeners();
+        this.initializeMapSystem();
         this.updateUI();
         this.startGameLoop();
     }
@@ -178,6 +179,10 @@ class FalloutAdventure {
                 break;
             case 'load':
                 this.loadCommand();
+                break;
+            case 'map':
+            case 'fasttravel':
+                this.showFastTravelLocations();
                 break;
             case 'quit':
             case 'exit':
@@ -475,13 +480,42 @@ class FalloutAdventure {
             this.player.talkedToNPCs.push(npc.name);
         }
         
+        // Check quest completion after talking to NPC
+        this.checkQuestCompletion();
+        
+        // Check for quests ready to hand in
+        const readyQuests = this.getReadyQuestsForNPC(npc.name);
+        
         // Show dialogue options if available
         if (npc.dialogueOptions && npc.dialogueOptions.length > 0) {
             this.addText('\nWhat do you want to ask?', 'info');
-            npc.dialogueOptions.forEach((option, index) => {
-                this.addText(`${index + 1}. ${option.text}`, 'info');
+            let optionIndex = 1;
+            
+            // Add regular dialogue options
+            npc.dialogueOptions.forEach((option) => {
+                this.addText(`${optionIndex}. ${option.text}`, 'info');
+                optionIndex++;
             });
+            
+            // Add quest hand-in options if available
+            readyQuests.forEach(questId => {
+                const quest = this.quests[questId];
+                this.addText(`${optionIndex}. Complete quest: ${quest.name}`, 'success');
+                optionIndex++;
+            });
+            
             this.addText('Type the number to select an option, or "bye" to end the conversation.', 'info');
+            
+            // Store current NPC for dialogue continuation
+            this.currentDialogueNPC = npc;
+        } else if (readyQuests.length > 0) {
+            // Only quest hand-in options available
+            this.addText('\nYou have completed quests to hand in:', 'info');
+            readyQuests.forEach((questId, index) => {
+                const quest = this.quests[questId];
+                this.addText(`${index + 1}. Complete quest: ${quest.name}`, 'success');
+            });
+            this.addText('Type the number to complete a quest, or "bye" to end the conversation.', 'info');
             
             // Store current NPC for dialogue continuation
             this.currentDialogueNPC = npc;
@@ -506,26 +540,42 @@ class FalloutAdventure {
         
         // Check if it's a number for dialogue options
         const optionNumber = parseInt(verb);
-        if (!isNaN(optionNumber) && this.currentDialogueNPC.dialogueOptions) {
-            const option = this.currentDialogueNPC.dialogueOptions[optionNumber - 1];
-            if (option) {
-                this.addText(`You ask: "${option.text}"`, 'info');
-                this.addText(`"${option.response}"`, 'highlight');
-                
-                // Handle any special effects
-                if (option.effect) {
-                    this.handleDialogueEffect(option.effect);
+        if (!isNaN(optionNumber)) {
+            const readyQuests = this.getReadyQuestsForNPC(this.currentDialogueNPC.name);
+            const regularOptions = this.currentDialogueNPC.dialogueOptions || [];
+            
+            // Check if it's a regular dialogue option
+            if (optionNumber <= regularOptions.length) {
+                const option = regularOptions[optionNumber - 1];
+                if (option) {
+                    this.addText(`You ask: "${option.text}"`, 'info');
+                    this.addText(`"${option.response}"`, 'highlight');
+                    
+                    // Handle any special effects
+                    if (option.effect) {
+                        this.handleDialogueEffect(option.effect);
+                    }
+                    
+                    // Show follow-up options if available
+                    if (option.followUp && option.followUp.length > 0) {
+                        this.addText('\nWhat else do you want to ask?', 'info');
+                        option.followUp.forEach((followOption, index) => {
+                            this.addText(`${index + 1}. ${followOption.text}`, 'info');
+                        });
+                    }
+                    
+                    return true;
                 }
-                
-                // Show follow-up options if available
-                if (option.followUp && option.followUp.length > 0) {
-                    this.addText('\nWhat else do you want to ask?', 'info');
-                    option.followUp.forEach((followOption, index) => {
-                        this.addText(`${index + 1}. ${followOption.text}`, 'info');
-                    });
+            }
+            // Check if it's a quest hand-in option
+            else if (optionNumber <= regularOptions.length + readyQuests.length) {
+                const questIndex = optionNumber - regularOptions.length - 1;
+                const questId = readyQuests[questIndex];
+                if (questId) {
+                    this.handInQuest(questId, this.currentDialogueNPC.name);
+                    this.currentDialogueNPC = null; // End conversation after quest hand-in
+                    return true;
                 }
-                
-                return true;
             }
         }
         
@@ -610,6 +660,7 @@ class FalloutAdventure {
         this.addText('inventory/inv/i - Check your inventory', 'info');
         this.addText('stats/character - View character stats', 'info');
         this.addText('help/h - Show this help', 'info');
+        this.addText('map/fasttravel - Show fast travel locations', 'info');
         this.addText('save - Save your game', 'info');
         this.addText('load - Load your game', 'info');
         this.addText('quit/exit - Quit the game', 'info');
@@ -753,6 +804,9 @@ class FalloutAdventure {
             this.addText(`You defeated ${this.currentEnemy.name}!`, 'success');
             this.gainExperience(this.currentEnemy.experience);
             
+            // Track combat encounters for quests
+            this.player.combatEncounters = (this.player.combatEncounters || 0) + 1;
+            
             // Drop loot
             if (this.currentEnemy.loot) {
                 this.currentEnemy.loot.forEach(item => {
@@ -764,6 +818,9 @@ class FalloutAdventure {
             // Remove enemy from location
             this.locations[this.currentLocation].enemies = 
                 this.locations[this.currentLocation].enemies.filter(e => e !== this.currentEnemy);
+            
+            // Check quest completion after combat victory
+            this.checkQuestCompletion();
         }
         
         this.currentEnemy = null;
@@ -917,15 +974,43 @@ class FalloutAdventure {
         }
     }
     
-    completeQuest(questId) {
+    checkQuestCompletion() {
+        // Check all active quests for completion status (but don't auto-complete)
+        for (const questId of this.activeQuests) {
+            const quest = this.quests[questId];
+            if (!quest) continue;
+            
+            let allObjectivesComplete = true;
+            
+            // Check each objective
+            for (const objective of quest.objectives) {
+                if (!this.isObjectiveCompleted(questId, objective)) {
+                    allObjectivesComplete = false;
+                    break;
+                }
+            }
+            
+            // Mark quest as ready for hand-in if all objectives are complete
+            if (allObjectivesComplete && !quest.readyForHandIn) {
+                quest.readyForHandIn = true;
+                this.addText(`Quest "${quest.name}" is ready to be completed! Return to the quest giver.`, 'success');
+            }
+        }
+    }
+    
+    handInQuest(questId, npcName) {
         const quest = this.quests[questId];
-        if (!quest) return;
+        if (!quest || !quest.readyForHandIn) {
+            this.addText('You don\'t have any completed quests to hand in.', 'error');
+            return;
+        }
         
         if (this.activeQuests && this.activeQuests.includes(questId)) {
             this.activeQuests = this.activeQuests.filter(q => q !== questId);
             this.completedQuests.push(questId);
             
-            this.addText(`Quest completed: ${quest.name}`, 'success');
+            // Show quest completion dialogue
+            this.showQuestCompletionDialogue(questId, npcName);
             
             // Give rewards
             if (quest.reward.experience) {
@@ -933,11 +1018,46 @@ class FalloutAdventure {
             }
             if (quest.reward.caps) {
                 this.player.caps += quest.reward.caps;
-                this.addText(`You receive ${quest.reward.caps} caps!`, 'success');
             }
             
             this.updateQuestUI();
         }
+    }
+    
+    showQuestCompletionDialogue(questId, npcName) {
+        const quest = this.quests[questId];
+        if (!quest) return;
+        
+        // Quest-specific completion dialogue
+        switch (questId) {
+            case 'firstSteps':
+                this.addText(`${npcName}: "Well done, stranger! You've proven you can handle yourself in Megaton. Here's your reward."`, 'highlight');
+                break;
+            case 'moiraExperiments':
+                this.addText(`${npcName}: "Excellent work! Your feedback on my experiments was invaluable. Here's your payment."`, 'highlight');
+                break;
+            case 'clearRaiderCamp':
+                this.addText(`${npcName}: "Impressive! You cleared out those raiders like a true wasteland warrior. You've earned this."`, 'highlight');
+                break;
+            case 'exploreWasteland':
+                this.addText(`${npcName}: "You've become a true wasteland explorer! Your knowledge of the area is impressive. Here's your reward."`, 'highlight');
+                break;
+            default:
+                this.addText(`${npcName}: "Thank you for completing that task. Here's your reward."`, 'highlight');
+        }
+        
+        this.addText(`Quest completed: ${quest.name}`, 'success');
+        if (quest.reward.caps) {
+            this.addText(`You receive ${quest.reward.caps} caps!`, 'success');
+        }
+        if (quest.reward.experience) {
+            this.addText(`You gain ${quest.reward.experience} experience!`, 'success');
+        }
+    }
+    
+    completeQuest(questId) {
+        // Legacy method - now redirects to handInQuest
+        this.handInQuest(questId, 'Quest Giver');
     }
     
     gameOver() {
@@ -971,6 +1091,7 @@ class FalloutAdventure {
         this.updateLocationUI();
         this.updateQuestUI();
         this.updateTimeUI();
+        this.updateMapDisplay();
     }
     
     updateCharacterUI() {
@@ -1118,7 +1239,15 @@ class FalloutAdventure {
                 if (quest) {
                     const questDiv = document.createElement('div');
                     questDiv.className = 'quest-item active clickable';
-                    questDiv.textContent = quest.name;
+                    
+                    // Add visual indicator for quests ready to hand in
+                    if (quest.readyForHandIn) {
+                        questDiv.className += ' ready-for-handin';
+                        questDiv.textContent = `✓ ${quest.name} (Ready to complete)`;
+                    } else {
+                        questDiv.textContent = quest.name;
+                    }
+                    
                     questDiv.onclick = () => this.showQuestDetails(questId);
                     questList.appendChild(questDiv);
                 }
@@ -1164,6 +1293,8 @@ class FalloutAdventure {
         
         if (this.completedQuests.includes(questId)) {
             this.addText('Status: COMPLETED', 'success');
+        } else if (quest.readyForHandIn) {
+            this.addText('Status: READY TO COMPLETE - Return to quest giver!', 'success');
         } else {
             this.addText('Status: IN PROGRESS', 'info');
         }
@@ -1178,7 +1309,7 @@ class FalloutAdventure {
                     return this.visitedLocations.has('megaton');
                 }
                 if (objective === 'Talk to Lucas Simms') {
-                    return this.completedQuests.includes('firstSteps') || this.hasTalkedToNPC('Lucas Simms');
+                    return this.hasTalkedToNPC('Lucas Simms');
                 }
                 break;
             case 'moiraExperiments':
@@ -1186,7 +1317,8 @@ class FalloutAdventure {
                     return this.hasTalkedToNPC('Moira Brown');
                 }
                 if (objective === 'Test 3 inventions') {
-                    return this.completedQuests.includes('moiraExperiments');
+                    // For now, just require talking to Moira (simplified)
+                    return this.hasTalkedToNPC('Moira Brown');
                 }
                 break;
             case 'clearRaiderCamp':
@@ -1194,7 +1326,9 @@ class FalloutAdventure {
                     return this.visitedLocations.has('raidercamp');
                 }
                 if (objective === 'Defeat all raiders') {
-                    return this.completedQuests.includes('clearRaiderCamp');
+                    // Check if there are no more raiders in the camp
+                    const raiderCamp = this.locations['raidercamp'];
+                    return raiderCamp && (!raiderCamp.enemies || raiderCamp.enemies.length === 0);
                 }
                 break;
             case 'exploreWasteland':
@@ -1202,7 +1336,7 @@ class FalloutAdventure {
                     return this.visitedLocations.size >= 5;
                 }
                 if (objective === 'Survive 3 combat encounters') {
-                    return this.player.combatEncounters >= 3;
+                    return (this.player.combatEncounters || 0) >= 3;
                 }
                 break;
         }
@@ -1212,6 +1346,29 @@ class FalloutAdventure {
     hasTalkedToNPC(npcName) {
         // Simple tracking - could be expanded
         return this.player.talkedToNPCs && this.player.talkedToNPCs.includes(npcName);
+    }
+    
+    getReadyQuestsForNPC(npcName) {
+        const readyQuests = [];
+        
+        // Map NPCs to their quests
+        const npcQuests = {
+            'Lucas Simms': ['firstSteps'],
+            'Moira Brown': ['moiraExperiments'],
+            'Moriarty': ['clearRaiderCamp'],
+            'Gob': ['exploreWasteland']
+        };
+        
+        const questsForNPC = npcQuests[npcName] || [];
+        
+        for (const questId of questsForNPC) {
+            const quest = this.quests[questId];
+            if (quest && quest.readyForHandIn && this.activeQuests.includes(questId)) {
+                readyQuests.push(questId);
+            }
+        }
+        
+        return readyQuests;
     }
     
     updateTimeUI() {
@@ -1225,6 +1382,428 @@ class FalloutAdventure {
         textLine.textContent = text;
         gameText.appendChild(textLine);
         gameText.scrollTop = gameText.scrollHeight;
+    }
+    
+    // Modular Map System
+    initializeMapSystem() {
+        this.mapConfig = this.initializeMapConfig();
+        this.createMapUI();
+        this.updateMapDisplay();
+    }
+    
+    initializeMapConfig() {
+        return {
+            // Define map areas with their properties
+            areas: {
+                'vault101': {
+                    name: 'Vault 101',
+                    type: 'vault',
+                    color: 'blue',
+                    description: 'Your starting vault'
+                },
+                'wasteland': {
+                    name: 'Wasteland',
+                    type: 'wilderness',
+                    color: 'orange',
+                    description: 'Dangerous wasteland'
+                },
+                'megaton': {
+                    name: 'Megaton',
+                    type: 'settlement',
+                    color: 'green',
+                    description: 'Safe settlement'
+                },
+                'megatoninn': {
+                    name: 'Megaton Inn',
+                    type: 'settlement',
+                    color: 'green',
+                    description: 'Safe inn'
+                },
+                'megatonmarket': {
+                    name: 'Megaton Market',
+                    type: 'settlement',
+                    color: 'green',
+                    description: 'Safe market'
+                },
+                'raidercamp': {
+                    name: 'Raider Camp',
+                    type: 'dangerous',
+                    color: 'red',
+                    description: 'Dangerous raider camp'
+                },
+                'superdupermart': {
+                    name: 'Super Duper Mart',
+                    type: 'ruins',
+                    color: 'yellow',
+                    description: 'Abandoned store'
+                }
+            },
+            
+            // Define area groups for visual organization
+            areaGroups: {
+                'settlement': {
+                    name: 'MEGATON SETTLEMENT',
+                    color: 'blue',
+                    locations: ['megaton', 'megatoninn', 'megatonmarket']
+                },
+                'wilderness': {
+                    name: 'WILD WASTELAND',
+                    color: 'orange',
+                    locations: ['wasteland', 'raidercamp', 'superdupermart']
+                },
+                'vault': {
+                    name: 'VAULT AREA',
+                    color: 'cyan',
+                    locations: ['vault101']
+                }
+            },
+            
+            // Flexible layout system
+            layout: {
+                type: 'grid', // 'grid', 'freeform', 'circular'
+                rows: 5,
+                cols: 3,
+                positions: {
+                    'vault101': { row: 0, col: 1 },
+                    'wasteland': { row: 1, col: 1 },
+                    'megatoninn': { row: 2, col: 0 },
+                    'megaton': { row: 2, col: 1 },
+                    'megatonmarket': { row: 2, col: 2 },
+                    'raidercamp': { row: 4, col: 0 },
+                    'superdupermart': { row: 4, col: 2 }
+                }
+            }
+        };
+    }
+    
+    createMapUI() {
+        const mapPanel = document.querySelector('.map-panel');
+        if (!mapPanel) return;
+        
+        // Create tabbed interface
+        const tabContainer = document.createElement('div');
+        tabContainer.className = 'tab-container';
+        tabContainer.innerHTML = `
+            <div class="tab-buttons">
+                <button class="tab-btn active" data-tab="actions">Actions</button>
+                <button class="tab-btn" data-tab="location">Location</button>
+                <button class="tab-btn" data-tab="quests">Quests</button>
+            </div>
+            <div class="tab-content">
+                <div class="tab-panel active" id="actionsPanel">
+                    <div class="panel-title">ACTIONS</div>
+                    <div class="action-buttons" id="actionButtons">
+                        <button class="action-btn" onclick="game.startGame()">NEW GAME</button>
+                        <button class="action-btn" onclick="game.saveCommand()">SAVE GAME</button>
+                        <button class="action-btn" onclick="game.loadCommand()">LOAD GAME</button>
+                    </div>
+                </div>
+                <div class="tab-panel" id="locationPanel">
+                    <div class="panel-title">LOCATION</div>
+                    <div class="current-location" id="currentLocation">UNKNOWN</div>
+                    <div class="location-description" id="locationDesc">You find yourself in an unknown place...</div>
+                    <div class="map-container">
+                        <div class="map-title">Wasteland Map</div>
+                        <div class="map-controls">
+                            <button class="map-control-btn" id="mapToggleView">Toggle View</button>
+                            <button class="map-control-btn" id="mapToggleLegend">Toggle Legend</button>
+                        </div>
+                        <div class="map-content" id="mapContent"></div>
+                        <div class="map-legend" id="mapLegend">
+                            ${this.generateLegend()}
+                        </div>
+                    </div>
+                </div>
+                <div class="tab-panel" id="questsPanel">
+                    <div class="panel-title">QUESTS</div>
+                    <div class="quest-list" id="questList">
+                        <div class="quest-item">No active quests</div>
+                    </div>
+                </div>
+            </div>
+        `;
+        
+        // Replace the entire right panel content
+        mapPanel.innerHTML = '';
+        mapPanel.appendChild(tabContainer);
+        
+        // Add event listeners for map controls and tabs
+        this.initializeMapControls();
+        this.initializeTabControls();
+    }
+    
+    generateLegend() {
+        const legendItems = [
+            { class: 'current', text: 'Current Location' },
+            { class: 'visited', text: '⚡ Fast Travel' },
+            { class: 'unvisited', text: 'Unvisited' }
+        ];
+        
+        // Add area type legends
+        Object.values(this.mapConfig.areaGroups).forEach(group => {
+            legendItems.push({
+                class: `area-${group.color}`,
+                text: group.name
+            });
+        });
+        
+        return legendItems.map(item => `
+            <div class="legend-item">
+                <span class="legend-color ${item.class}"></span>
+                <span>${item.text}</span>
+            </div>
+        `).join('');
+    }
+    
+    initializeMapControls() {
+        const toggleViewBtn = document.getElementById('mapToggleView');
+        const toggleLegendBtn = document.getElementById('mapToggleLegend');
+        
+        if (toggleViewBtn) {
+            toggleViewBtn.addEventListener('click', () => {
+                this.toggleMapView();
+            });
+        }
+        
+        if (toggleLegendBtn) {
+            toggleLegendBtn.addEventListener('click', () => {
+                this.toggleMapLegend();
+            });
+        }
+    }
+    
+    toggleMapView() {
+        const mapContent = document.getElementById('mapContent');
+        if (!mapContent) return;
+        
+        const currentView = mapContent.dataset.view || 'grid';
+        const newView = currentView === 'grid' ? 'list' : 'grid';
+        
+        mapContent.dataset.view = newView;
+        this.updateMapDisplay();
+    }
+    
+    toggleMapLegend() {
+        const mapLegend = document.getElementById('mapLegend');
+        if (!mapLegend) return;
+        
+        mapLegend.style.display = mapLegend.style.display === 'none' ? 'block' : 'none';
+    }
+    
+    initializeTabControls() {
+        const tabButtons = document.querySelectorAll('.tab-btn');
+        
+        tabButtons.forEach(button => {
+            button.addEventListener('click', () => {
+                const tabName = button.dataset.tab;
+                this.switchTab(tabName);
+            });
+        });
+    }
+    
+    switchTab(tabName) {
+        // Remove active class from all buttons and panels
+        document.querySelectorAll('.tab-btn').forEach(btn => btn.classList.remove('active'));
+        document.querySelectorAll('.tab-panel').forEach(panel => panel.classList.remove('active'));
+        
+        // Add active class to selected button and panel
+        const selectedButton = document.querySelector(`[data-tab="${tabName}"]`);
+        const selectedPanel = document.getElementById(`${tabName}Panel`);
+        
+        if (selectedButton) selectedButton.classList.add('active');
+        if (selectedPanel) selectedPanel.classList.add('active');
+        
+        // Update content when switching to location tab
+        if (tabName === 'location') {
+            this.updateMapDisplay();
+        }
+        
+        // Update content when switching to quests tab
+        if (tabName === 'quests') {
+            this.updateQuestUI();
+        }
+    }
+    
+    updateMapDisplay() {
+        const mapContent = document.getElementById('mapContent');
+        if (!mapContent) return;
+        
+        const viewType = mapContent.dataset.view || 'grid';
+        
+        if (viewType === 'grid') {
+            this.renderGridView(mapContent);
+        } else {
+            this.renderListView(mapContent);
+        }
+    }
+    
+    renderGridView(container) {
+        container.innerHTML = '';
+        
+        // Create grid layout
+        const grid = document.createElement('div');
+        grid.className = 'map-grid';
+        grid.style.display = 'grid';
+        grid.style.gridTemplateColumns = `repeat(${this.mapConfig.layout.cols}, 1fr)`;
+        grid.style.gridTemplateRows = `repeat(${this.mapConfig.layout.rows}, 1fr)`;
+        grid.style.gap = '2px';
+        
+        // Create empty grid cells
+        const totalCells = this.mapConfig.layout.rows * this.mapConfig.layout.cols;
+        for (let i = 0; i < totalCells; i++) {
+            const cell = document.createElement('div');
+            cell.className = 'map-cell';
+            grid.appendChild(cell);
+        }
+        
+        // Place locations in their positions
+        Object.entries(this.mapConfig.layout.positions).forEach(([locationId, position]) => {
+            const cellIndex = position.row * this.mapConfig.layout.cols + position.col;
+            const cell = grid.children[cellIndex];
+            
+            if (cell && this.locations[locationId]) {
+                const locationElement = this.createLocationElement(locationId);
+                cell.appendChild(locationElement);
+            }
+        });
+        
+        container.appendChild(grid);
+    }
+    
+    renderListView(container) {
+        container.innerHTML = '';
+        
+        // Group locations by area type
+        const groupedLocations = this.groupLocationsByArea();
+        
+        Object.entries(groupedLocations).forEach(([areaType, locations]) => {
+            const areaGroup = document.createElement('div');
+            areaGroup.className = 'map-area-group';
+            
+            const areaHeader = document.createElement('div');
+            areaHeader.className = 'map-area-header';
+            areaHeader.textContent = this.mapConfig.areaGroups[areaType]?.name || areaType.toUpperCase();
+            areaGroup.appendChild(areaHeader);
+            
+            const locationList = document.createElement('div');
+            locationList.className = 'map-location-list';
+            
+            locations.forEach(locationId => {
+                const locationElement = this.createLocationElement(locationId);
+                locationList.appendChild(locationElement);
+            });
+            
+            areaGroup.appendChild(locationList);
+            container.appendChild(areaGroup);
+        });
+    }
+    
+    groupLocationsByArea() {
+        const groups = {};
+        
+        Object.entries(this.mapConfig.areaGroups).forEach(([groupName, group]) => {
+            groups[groupName] = group.locations.filter(locationId => 
+                this.locations[locationId] // Only include locations that exist
+            );
+        });
+        
+        return groups;
+    }
+    
+    createLocationElement(locationId) {
+        const location = this.locations[locationId];
+        const areaConfig = this.mapConfig.areas[locationId];
+        
+        if (!location || !areaConfig) return null;
+        
+        const locationDiv = document.createElement('div');
+        locationDiv.className = 'map-location';
+        locationDiv.dataset.location = locationId;
+        locationDiv.textContent = location.name;
+        
+        // Set location status
+        if (locationId === this.currentLocation) {
+            locationDiv.classList.add('current');
+        } else if (this.visitedLocations.has(locationId)) {
+            locationDiv.classList.add('visited');
+            locationDiv.classList.add('fast-travel');
+        } else {
+            locationDiv.classList.add('unvisited');
+        }
+        
+        // Add area type styling
+        locationDiv.classList.add(`area-${areaConfig.color}`);
+        locationDiv.classList.add(`type-${areaConfig.type}`);
+        
+        // Add click event
+        locationDiv.addEventListener('click', () => {
+            this.navigateToLocation(locationId);
+        });
+        
+        // Add tooltip
+        locationDiv.title = `${location.description}\nType: ${areaConfig.type}`;
+        
+        return locationDiv;
+    }
+    
+    
+    navigateToLocation(locationId) {
+        const location = this.locations[locationId];
+        if (!location) return;
+        
+        // Check if location has been visited before (fast travel)
+        if (!this.visitedLocations.has(locationId)) {
+            // First time visiting - check if accessible
+            if (!this.canAccessLocation(locationId)) {
+                this.addText(`You can't go to ${location.name} right now.`, 'error');
+                return;
+            }
+            this.addText(`You travel to ${location.name}.`, 'success');
+        } else {
+            // Fast travel to previously visited location
+            this.addText(`You fast travel to ${location.name}.`, 'success');
+        }
+        
+        // Move to location
+        this.currentLocation = locationId;
+        this.visitedLocations.add(locationId);
+        
+        // Check quest completion after visiting location
+        this.checkQuestCompletion();
+        
+        this.updateMapDisplay();
+        this.updateUI();
+        this.lookCommand();
+    }
+    
+    canAccessLocation(locationId) {
+        const location = this.locations[locationId];
+        if (!location) return false;
+        
+        // Check if there's a direct path from current location
+        const currentLocation = this.locations[this.currentLocation];
+        if (!currentLocation) return false;
+        
+        // Check if there's an exit to this location
+        return currentLocation.exits.some(exit => exit.location === locationId);
+    }
+    
+    showFastTravelLocations() {
+        const visitedLocations = Array.from(this.visitedLocations);
+        
+        if (visitedLocations.length <= 1) {
+            this.addText('You haven\'t visited enough locations for fast travel yet.', 'info');
+            return;
+        }
+        
+        this.addText('Fast Travel Locations:', 'highlight');
+        visitedLocations.forEach((locationId, index) => {
+            const location = this.locations[locationId];
+            if (location && locationId !== this.currentLocation) {
+                this.addText(`${index + 1}. ${location.name}`, 'info');
+            }
+        });
+        this.addText('Click on the map or use "go [location name]" to fast travel.', 'info');
     }
     
     startGame() {
