@@ -52,7 +52,9 @@ class FalloutAdventure {
             equipped: {
                 weapon: null,
                 armor: null
-            }
+            },
+            talkedToNPCs: [],
+            combatEncounters: 0
         };
         
         // Game World
@@ -468,6 +470,11 @@ class FalloutAdventure {
         this.addText(`You talk to ${npc.name}.`, 'info');
         this.addText(`"${npc.dialogue}"`, 'highlight');
         
+        // Track NPC conversation
+        if (!this.player.talkedToNPCs.includes(npc.name)) {
+            this.player.talkedToNPCs.push(npc.name);
+        }
+        
         // Show dialogue options if available
         if (npc.dialogueOptions && npc.dialogueOptions.length > 0) {
             this.addText('\nWhat do you want to ask?', 'info');
@@ -663,6 +670,9 @@ class FalloutAdventure {
         this.addText(`Combat started! You are fighting ${enemy.name}!`, 'error');
         this.addText(`${enemy.name}: ${enemy.hp}/${enemy.maxHp} HP`, 'error');
         this.addText('Type "attack" to fight or "flee" to run away.', 'info');
+        
+        // Track combat encounter
+        this.player.combatEncounters++;
     }
     
     processCombatCommand(command) {
@@ -1107,12 +1117,101 @@ class FalloutAdventure {
                 const quest = this.quests[questId];
                 if (quest) {
                     const questDiv = document.createElement('div');
-                    questDiv.className = 'quest-item active';
+                    questDiv.className = 'quest-item active clickable';
                     questDiv.textContent = quest.name;
+                    questDiv.onclick = () => this.showQuestDetails(questId);
                     questList.appendChild(questDiv);
                 }
             });
         }
+        
+        // Add completed quests section
+        if (this.completedQuests && this.completedQuests.length > 0) {
+            const completedHeader = document.createElement('div');
+            completedHeader.className = 'quest-header';
+            completedHeader.textContent = 'Completed Quests:';
+            questList.appendChild(completedHeader);
+            
+            this.completedQuests.forEach(questId => {
+                const quest = this.quests[questId];
+                if (quest) {
+                    const questDiv = document.createElement('div');
+                    questDiv.className = 'quest-item completed clickable';
+                    questDiv.textContent = quest.name;
+                    questDiv.onclick = () => this.showQuestDetails(questId);
+                    questList.appendChild(questDiv);
+                }
+            });
+        }
+    }
+    
+    showQuestDetails(questId) {
+        const quest = this.quests[questId];
+        if (!quest) return;
+        
+        this.addText(`\n=== ${quest.name} ===`, 'highlight');
+        this.addText(quest.description, 'info');
+        this.addText(`\nObjectives:`, 'info');
+        
+        quest.objectives.forEach((objective, index) => {
+            const isCompleted = this.isObjectiveCompleted(questId, objective);
+            const status = isCompleted ? '✓' : '○';
+            const statusColor = isCompleted ? 'success' : 'info';
+            this.addText(`${status} ${objective}`, statusColor);
+        });
+        
+        this.addText(`\nReward: ${quest.reward.experience} XP, ${quest.reward.caps} caps`, 'info');
+        
+        if (this.completedQuests.includes(questId)) {
+            this.addText('Status: COMPLETED', 'success');
+        } else {
+            this.addText('Status: IN PROGRESS', 'info');
+        }
+    }
+    
+    isObjectiveCompleted(questId, objective) {
+        // Simple objective completion tracking
+        // This could be expanded with more sophisticated tracking
+        switch (questId) {
+            case 'firstSteps':
+                if (objective === 'Visit Megaton') {
+                    return this.visitedLocations.has('megaton');
+                }
+                if (objective === 'Talk to Lucas Simms') {
+                    return this.completedQuests.includes('firstSteps') || this.hasTalkedToNPC('Lucas Simms');
+                }
+                break;
+            case 'moiraExperiments':
+                if (objective === 'Talk to Moira Brown') {
+                    return this.hasTalkedToNPC('Moira Brown');
+                }
+                if (objective === 'Test 3 inventions') {
+                    return this.completedQuests.includes('moiraExperiments');
+                }
+                break;
+            case 'clearRaiderCamp':
+                if (objective === 'Go to Raider Camp') {
+                    return this.visitedLocations.has('raidercamp');
+                }
+                if (objective === 'Defeat all raiders') {
+                    return this.completedQuests.includes('clearRaiderCamp');
+                }
+                break;
+            case 'exploreWasteland':
+                if (objective === 'Visit 5 different locations') {
+                    return this.visitedLocations.size >= 5;
+                }
+                if (objective === 'Survive 3 combat encounters') {
+                    return this.player.combatEncounters >= 3;
+                }
+                break;
+        }
+        return false;
+    }
+    
+    hasTalkedToNPC(npcName) {
+        // Simple tracking - could be expanded
+        return this.player.talkedToNPCs && this.player.talkedToNPCs.includes(npcName);
     }
     
     updateTimeUI() {
